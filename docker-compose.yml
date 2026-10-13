@@ -1,0 +1,105 @@
+# CodeChalk chạy đầy đủ: PostgreSQL + máy chủ + máy chấm Docker (+ đường hầm công khai tuỳ chọn).
+#
+#   docker compose up -d --build                    # chạy, mở http://localhost:8000
+#   docker compose --profile public up -d           # thêm link công khai https://….trycloudflare.com cho bạn bè
+#   docker compose --profile domain up -d           # dùng tên miền riêng qua Cloudflare Tunnel (cần CLOUDFLARE_TUNNEL_TOKEN)
+#   docker compose --profile vps up -d --build      # trên VPS: thêm Caddy, web chạy ở https://DOMAIN (xem deploy/)
+#
+# Trên Windows dùng các file docker_start.bat / docker_public.bat / docker_stop.bat cho nhanh.
+name: codechalk
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: codechalk
+      POSTGRES_USER: codechalk
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-codechalk-db-pass}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U codechalk -d codechalk"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  # Chỉ để build ảnh máy chấm codechalk-judge:latest rồi thoát.
+  judge-image:
+    build: ./judge
+    image: codechalk-judge:latest
+    command: ["python3", "-c", "print('codechalk-judge ready')"]
+    restart: "no"
+
+  app:
+    build: .
+    image: codechalk-app:latest
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      APP_ENV: production
+      DATABASE_URL: postgresql+psycopg://codechalk:${POSTGRES_PASSWORD:-codechalk-db-pass}@db:5432/codechalk
+      JUDGE_MODE: docker
+      JUDGE_DOCKER_IMAGE: codechalk-judge:latest
+      JUDGE_WORK_DIR: /judge-work
+      JUDGE_DOCKER_VOLUME: codechalk-judge-work
+      UPLOAD_DIR: /data/uploads
+    ports:
+      # Trên VPS đặt APP_BIND=127.0.0.1 để chỉ Caddy (HTTPS) mới gọi được vào máy chủ
+      - "${APP_BIND:-0.0.0.0}:${APP_PORT:-8000}:8000"
+    volumes:
+      - uploads:/data/uploads
+      - judgework:/judge-work
+      # Máy chủ mở container chấm bài riêng cho từng lượt nộp (không mạng, chỉ đọc, user không đặc quyền)
+      - /var/run/docker.sock:/var/run/docker.sock
+    depends_on:
+      db:
+        condition: service_healthy
+      judge-image:
+        condition: service_completed_successfully
+
+  # VPS + tên miền riêng: Caddy nhận https://DOMAIN và tự cấp chứng chỉ HTTPS.  docker compose --profile vps up -d
+  caddy:
+    image: caddy:2-alpine
+    profiles: ["vps"]
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      DOMAIN: ${DOMAIN:-localhost}
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - app
+
+  # Link công khai miễn phí, không cần tên miền. Link đổi mỗi lần khởi động lại đường hầm.
+  tunnel:
+    image: cloudflare/cloudflared:latest
+    profiles: ["public"]
+    restart: unless-stopped
+    command: ["tunnel", "--no-autoupdate", "--url", "http://app:8000"]
+    depends_on:
+      - app
+
+  # Tên miền cố định: tạo Tunnel trong Cloudflare Zero Trust, trỏ hostname tới http://app:8000, dán token vào .env.
+  tunnel-domain:
+    image: cloudflare/cloudflared:latest
+    profiles: ["domain"]
+    restart: unless-stopped
+    command: ["tunnel", "--no-autoupdate", "run"]
+    environment:
+      TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN:-}
+    depends_on:
+      - app
+
+volumes:
+  caddy_data:
+  caddy_config:
+  pgdata:
+  uploads:
+  judgework:
+    name: codechalk-judge-work

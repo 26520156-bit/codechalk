@@ -1,0 +1,11 @@
+# CodeChalk Platform — thư viện Python cho máy chủ (khuyên dùng Python 3.12 hoặc 3.13).
+# Chỉ giữ thư viện có sẵn bản cài đặt dựng sẵn (wheel) để không phải biên dịch trên Windows.
+fastapi>=0.115,<1.0
+uvicorn>=0.30                  # máy chủ ASGI (không dùng uvicorn[standard] để khỏi phải cài PyYAML, httptools)
+websockets>=13                 # WebSocket cho chat và chuông thông báo
+pydantic>=2.7,<3
+sqlalchemy>=2.0.30,<2.1
+bcrypt>=4.1                    # băm mật khẩu
+PyJWT>=2.8                     # mã đăng nhập
+python-multipart>=0.0.9        # tải tệp (tài liệu, ảnh chat, ảnh QR)
+qrcode>=7.4                    # ảnh VietQR (tự xuất PNG, không cần Pillow)

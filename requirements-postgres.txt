@@ -1,0 +1,3 @@
+# Thêm khi dùng PostgreSQL (docker compose tự cài).
+-r requirements.txt
+psycopg[binary]>=3.2,<4
